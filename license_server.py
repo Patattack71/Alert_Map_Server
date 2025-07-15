@@ -2,41 +2,37 @@ from flask import Flask, request, jsonify
 import sqlite3
 
 app = Flask(__name__)
+DB_FILE = "licenses.db"  # <-- Correct variable name here
 
-# Initialize SQLite database
-def init_db():
-    with sqlite3.connect("licenses.db") as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS licenses (
-                key TEXT PRIMARY KEY,
-                machine_id TEXT
-            )
-        ''')
-
-# API to verify license
-@app.route('/verify', methods=['GET', 'POST'])
+@app.route("/verify", methods=["GET", "POST"])
 def verify():
-    key = request.args.get('key') or request.form.get('key')
-    machine = request.args.get('machine') or request.form.get('machine')
+    key = request.values.get("key")
+    machine = request.values.get("machine")
 
     if not key or not machine:
         return jsonify({"valid": False, "error": "Missing key or machine"}), 400
 
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-    c.execute("SELECT * FROM licenses WHERE key = ? AND (machine_id = '' OR machine_id = ?)", (key, machine))
-    result = c.fetchone()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.execute("SELECT machine_id FROM licenses WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        conn.close()
 
-    if result:
-        # Optional: Lock this key to the machine
-        if result[2] == '':
-            conn = sqlite3.connect(DATABASE)
-            c = conn.cursor()
-            c.execute("UPDATE licenses SET machine_id = ? WHERE key = ?", (machine, key))
-            conn.commit()
-            conn.close()
+        if row:
+            stored_machine = row[0]
+            if stored_machine == "" or stored_machine == machine:
+                # Bind the machine if not already bound
+                if stored_machine == "":
+                    conn = sqlite3.connect(DB_FILE)
+                    conn.execute("UPDATE licenses SET machine_id = ? WHERE key = ?", (machine, key))
+                    conn.commit()
+                    conn.close()
+                return jsonify({"valid": True})
+        
+        return jsonify({"valid": False, "error": "Invalid license key or machine ID"})
 
-        return jsonify({"valid": True})
-    else:
-        return jsonify({"valid": False, "error": "Invalid license key or machine ID"}), 403
+    except Exception as e:
+        return jsonify({"valid": False, "error": f"Server error: {str(e)}"}), 500
+
+if __name__ == "__main__":
+    app.run(debug=True)
