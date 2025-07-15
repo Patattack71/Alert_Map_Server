@@ -14,30 +14,29 @@ def init_db():
         ''')
 
 # API to verify license
-@app.route("/verify", methods=["POST"])
-def verify_license():
-    data = request.get_json()
-    key = data.get("key")
-    machine = data.get("machine")
+@app.route('/verify', methods=['GET', 'POST'])
+def verify():
+    key = request.args.get('key') or request.form.get('key')
+    machine = request.args.get('machine') or request.form.get('machine')
 
     if not key or not machine:
         return jsonify({"valid": False, "error": "Missing key or machine"}), 400
 
-    with sqlite3.connect("licenses.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT machine_id FROM licenses WHERE key = ?", (key,))
-        result = cursor.fetchone()
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT * FROM licenses WHERE key = ? AND (machine_id = '' OR machine_id = ?)", (key, machine))
+    result = c.fetchone()
+    conn.close()
 
-        if not result:
-            return jsonify({"valid": False, "error": "Key not found"}), 404
-        elif result[0] == "" or result[0] == machine:
-            if result[0] == "":
-                cursor.execute("UPDATE licenses SET machine_id = ? WHERE key = ?", (machine, key))
-                conn.commit()
-            return jsonify({"valid": True}), 200
-        else:
-            return jsonify({"valid": False, "error": "Key used on another machine"}), 403
+    if result:
+        # Optional: Lock this key to the machine
+        if result[2] == '':
+            conn = sqlite3.connect(DATABASE)
+            c = conn.cursor()
+            c.execute("UPDATE licenses SET machine_id = ? WHERE key = ?", (machine, key))
+            conn.commit()
+            conn.close()
 
-if __name__ == "__main__":
-    init_db()
-    app.run(host="0.0.0.0", port=5000)
+        return jsonify({"valid": True})
+    else:
+        return jsonify({"valid": False, "error": "Invalid license key or machine ID"}), 403
